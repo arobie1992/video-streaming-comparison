@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebSocket Stored Video</title>
+</head>
+<body>
+    <video id="video" width="750" controls></video>
+    <script type="text/javascript">
+        const mimeCodec = 'video/mp4; codecs="avc1.4D401F, mp4a.40.2"';
+        const mediaSource = new MediaSource();
+        const video = document.querySelector("#video");
+        video.src = URL.createObjectURL(mediaSource);
+
+        mediaSource.onsourceopen = () => {
+            let sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+            fetch("http://localhost:8080/video").then(
+                async resp => {
+                    const reader = resp.body.getReader();
+                    while(true) {
+                        const body = await reader.read();
+                        if(body.done) {
+                            break;
+                        }
+                        await new Promise((resolve, _) => {
+                            sourceBuffer.appendBuffer(body.value);
+                            sourceBuffer.onupdateend = (() => {
+                                resolve(true);
+                            });
+                        });
+                    }
+                    console.log("done");
+                },
+                reason => console.log(`Rejected due to: ${reason}`)
+            );
+        }
+
+        // video.onplay = () => {
+        //     const ws = new WebSocket("ws://localhost:8080/video");
+        //     ws.binaryType = 'arraybuffer';
+        //     ws.onmessage = async (e) => {
+        //         const data = await e.data;
+        //         console.log(video.readyState);
+        //         sourceBuffer.appendBuffer(data);
+        //     }
+        // }
+    </script>
+</body>
+</html>
