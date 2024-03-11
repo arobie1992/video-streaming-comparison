@@ -11,39 +11,62 @@
         const mediaSource = new MediaSource();
         const video = document.querySelector("#video");
         video.src = URL.createObjectURL(mediaSource);
+        const enc = new TextDecoder();
+        const webs = (sourceBuffer) => {
+            const ws = new WebSocket("ws://localhost:8080/stream");
+            ws.binaryType = 'arraybuffer';
+            const q = [];
+            ws.onclose = async () => console.log("ws closed");
+            ws.onmessage = async e => {
+                const buf = new Uint8Array(e.data);
+                if(buf.length > 0) {
+                    q.push(buf);
+                } else {
+                    let l = 0;
+                    for (const data of q) {
+                        await new Promise((resolve, _) => {
+                            l +=  data.length;
+                            console.log(l, data);
+                            sourceBuffer.appendBuffer(data);
+                            sourceBuffer.onupdateend = (() => {
+                                resolve(true);
+                            });
+                        });
+                    }
+                }
+            }
+        }
 
-        mediaSource.onsourceopen = () => {
-            let sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+        const fc = (sourceBuffer) => {
             fetch("http://localhost:8080/video").then(
                 async resp => {
                     const reader = resp.body.getReader();
+                    let l = 0;
                     while(true) {
                         const body = await reader.read();
                         if(body.done) {
                             break;
                         }
                         await new Promise((resolve, _) => {
+                            console.log(body.value);
+                            l += body.value.length;
                             sourceBuffer.appendBuffer(body.value);
                             sourceBuffer.onupdateend = (() => {
                                 resolve(true);
                             });
                         });
                     }
-                    console.log("done");
+                    console.log(l);
                 },
                 reason => console.log(`Rejected due to: ${reason}`)
             );
         }
 
-        // video.onplay = () => {
-        //     const ws = new WebSocket("ws://localhost:8080/video");
-        //     ws.binaryType = 'arraybuffer';
-        //     ws.onmessage = async (e) => {
-        //         const data = await e.data;
-        //         console.log(video.readyState);
-        //         sourceBuffer.appendBuffer(data);
-        //     }
-        // }
+        mediaSource.onsourceopen = () => {
+            let sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+            webs(sourceBuffer);
+            // fc(sourceBuffer);
+        }
     </script>
 </body>
 </html>

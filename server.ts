@@ -6,6 +6,9 @@ const handler = (request: Request): Promise<Response>|Response => {
         // return videoHandler(request);
         return vh();
     }
+    if(url.pathname.startsWith("/stream")) {
+        return videoHandler(request);
+    }
     return pageHandler();
 };
 
@@ -39,6 +42,9 @@ const videoHandler = (request: Request): Response => {
         console.log("ready state:", socket.readyState);
         streamVideo(buff => socket.send(buff), () => socket.close());
     }
+    socket.onclose = () => {
+        console.log('closed');
+    }
     return response;
 }
 
@@ -47,12 +53,13 @@ const streamVideo = (send: (buff: Uint8Array) => void, cleanup: () => void) => {
         console.log("beginning sending video");
         const len = 1500;
         const buff = new Uint8Array(len);
-        const f = Deno.openSync("./video/SampleVideo_1280x720_30mb.mp4");
+        const f = Deno.openSync("./video/fragged-SampleVideo_1280x720_30mb.mp4");
         let totalSent = 0;
         for(let out = f.readSync(buff); out === len; out = f.readSync(buff)) {
             send(buff);
             totalSent += out;
         }
+        send(new Uint8Array(0));
         console.log("Total sent: ", totalSent);
         cleanup();
     // }
