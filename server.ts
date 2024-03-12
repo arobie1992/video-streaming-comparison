@@ -2,26 +2,11 @@ const port= 8080;
 
 const handler = (request: Request): Promise<Response>|Response => {
     const url = new URL(request.url);
-    if(url.pathname.startsWith("/video")) {
-        // return videoHandler(request);
-        return vh();
-    }
     if(url.pathname.startsWith("/stream")) {
         return videoHandler(request);
     }
     return pageHandler();
 };
-
-const vh = (): Response => {
-    console.log("whole thing");
-    const vid = Deno.readFileSync("./video/fragged-SampleVideo_1280x720_30mb.mp4");
-    return new Response(vid, {
-        status: 200,
-        headers: {
-            "content-type": "video/mp4"
-        }
-    });
-}
 
 const pageHandler = async (): Promise<Response> => {
     const file = await Deno.readFile("./client/ws-stored.html");
@@ -45,9 +30,7 @@ const videoHandler = (request: Request): Response => {
         const cleanup = () => socket.close(1000, "stream finished")
         await throttledSend(send, cleanup, f.readable.getReader(), 0);
     }
-    socket.onclose = () => {
-        console.log('closed with remaining:', socket.bufferedAmount);
-    }
+    socket.onclose = () => console.log('closed with remaining:', socket.bufferedAmount);
     return response;
 }
 
@@ -60,9 +43,8 @@ const throttledSend = async (send: (buff: Uint8Array) => void , cleanup: () => v
     const data = body.value;
     send(data);
     totalSent += data.length;
-    console.log(totalSent);
+    // console.log(totalSent);
     setTimeout(() => throttledSend(send, cleanup, f, totalSent), 1);
 }
 
-console.log(`HTTP server running. Access it at: http://localhost:8080/`);
 Deno.serve({ port }, handler);
