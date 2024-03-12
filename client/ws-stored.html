@@ -10,30 +10,34 @@
         window.addEventListener('load', function () {
             const mimeCodec = 'video/mp4; codecs="avc1.4D401F, mp4a.40.2"';
             const mediaSource = new MediaSource();
-            const video = document.querySelector("#video");
+            const video = document.querySelector('#video');
             video.src = URL.createObjectURL(mediaSource);
 
             const streamVideo = (sourceBuffer) => {
-                const ws = new WebSocket("ws://localhost:8080/stream");
+                const ws = new WebSocket('ws://localhost:8080/stream');
                 ws.onerror = e => console.log('error!', e);
                 ws.binaryType = 'arraybuffer';
                 const q = [];
+                let l = 0;
                 ws.onclose = async () => {
                     ws.close();
-                    console.log("ws closed");
-                    let l = 0;
-                    for (const data of q) {
-                        await new Promise((resolve, _) => {
-                            l +=  data.length;
-                            sourceBuffer.appendBuffer(data);
-                            sourceBuffer.onupdateend = (() => {
-                                resolve(true);
-                            });
-                        });
-                    }
-                    console.log('received:', l);
+                    console.log('ws closed', 'received:', l);
                 }
-                ws.onmessage = async e => q.push(new Uint8Array(e.data));
+                ws.onmessage = async e => {
+                    const data = new Uint8Array(e.data);
+                    l += data.length;
+                    if(sourceBuffer.updating || q.length) {
+                        q.push(data);
+                        while(q.length) {
+                            await new Promise((resolve, _) => {
+                                sourceBuffer.appendBuffer(q.shift());
+                                sourceBuffer.onupdateend = (() => resolve(true));
+                            });
+                        }
+                    } else {
+                        sourceBuffer.appendBuffer(e.data);
+                    }
+                }
             }
 
             let sourceBuffer;
