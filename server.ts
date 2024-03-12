@@ -38,31 +38,30 @@ const videoHandler = (request: Request): Response => {
     }
 
     const { socket, response } = Deno.upgradeWebSocket(request);
-    socket.onopen = () => {
-        console.log("ready state:", socket.readyState);
-        streamVideo(buff => socket.send(buff), () => socket.close());
+    socket.onopen = async () => {
+        console.log("beginning sending video");
+        const f = Deno.openSync("./video/fragged-SampleVideo_1280x720_30mb.mp4");
+        const send = (buff: Uint8Array) => socket.send(buff);
+        const cleanup = () => socket.close(1000, "stream finished")
+        await throttledSend(send, cleanup, f.readable.getReader(), 0);
     }
     socket.onclose = () => {
-        console.log('closed');
+        console.log('closed with remaining:', socket.bufferedAmount);
     }
     return response;
 }
 
-const streamVideo = (send: (buff: Uint8Array) => void, cleanup: () => void) => {
-    // return () => {
-        console.log("beginning sending video");
-        const len = 1500;
-        const buff = new Uint8Array(len);
-        const f = Deno.openSync("./video/fragged-SampleVideo_1280x720_30mb.mp4");
-        let totalSent = 0;
-        for(let out = f.readSync(buff); out === len; out = f.readSync(buff)) {
-            send(buff);
-            totalSent += out;
-        }
-        send(new Uint8Array(0));
-        console.log("Total sent: ", totalSent);
+const throttledSend = async (send: (buff: Uint8Array) => void , cleanup: () => void, f: ReadableStreamDefaultReader<Uint8Array>, totalSent: number) => {
+    const body = await f.read();
+    if(body.done) {
         cleanup();
-    // }
+        return;
+    }
+    const data = body.value;
+    send(data);
+    totalSent += data.length;
+    console.log(totalSent);
+    setTimeout(() => throttledSend(send, cleanup, f, totalSent), 1);
 }
 
 console.log(`HTTP server running. Access it at: http://localhost:8080/`);

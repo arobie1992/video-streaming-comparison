@@ -7,26 +7,24 @@
 <body>
     <video id="video" width="750" controls></video>
     <script type="text/javascript">
-        const mimeCodec = 'video/mp4; codecs="avc1.4D401F, mp4a.40.2"';
-        const mediaSource = new MediaSource();
-        const video = document.querySelector("#video");
-        video.src = URL.createObjectURL(mediaSource);
-        const enc = new TextDecoder();
-        const webs = (sourceBuffer) => {
-            const ws = new WebSocket("ws://localhost:8080/stream");
-            ws.binaryType = 'arraybuffer';
-            const q = [];
-            ws.onclose = async () => console.log("ws closed");
-            ws.onmessage = async e => {
-                const buf = new Uint8Array(e.data);
-                if(buf.length > 0) {
-                    q.push(buf);
-                } else {
+        window.addEventListener('load', function () {
+            const mimeCodec = 'video/mp4; codecs="avc1.4D401F, mp4a.40.2"';
+            const mediaSource = new MediaSource();
+            const video = document.querySelector("#video");
+            video.src = URL.createObjectURL(mediaSource);
+
+            const webs = (sourceBuffer) => {
+                const ws = new WebSocket("ws://localhost:8080/stream");
+                ws.onerror = e => console.log('error!', e);
+                ws.binaryType = 'arraybuffer';
+                const q = [];
+                ws.onclose = async () => {
+                    ws.close();
+                    console.log("ws closed");
                     let l = 0;
                     for (const data of q) {
                         await new Promise((resolve, _) => {
                             l +=  data.length;
-                            console.log(l, data);
                             sourceBuffer.appendBuffer(data);
                             sourceBuffer.onupdateend = (() => {
                                 resolve(true);
@@ -34,39 +32,45 @@
                         });
                     }
                 }
-            }
-        }
-
-        const fc = (sourceBuffer) => {
-            fetch("http://localhost:8080/video").then(
-                async resp => {
-                    const reader = resp.body.getReader();
-                    let l = 0;
-                    while(true) {
-                        const body = await reader.read();
-                        if(body.done) {
-                            break;
-                        }
-                        await new Promise((resolve, _) => {
-                            console.log(body.value);
-                            l += body.value.length;
-                            sourceBuffer.appendBuffer(body.value);
-                            sourceBuffer.onupdateend = (() => {
-                                resolve(true);
-                            });
-                        });
+                ws.onmessage = async e => {
+                    const buf = new Uint8Array(e.data);
+                    if(buf.length) {
+                        q.push(buf);
                     }
-                    console.log(l);
-                },
-                reason => console.log(`Rejected due to: ${reason}`)
-            );
-        }
+                }
+            }
 
-        mediaSource.onsourceopen = () => {
-            let sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
-            webs(sourceBuffer);
-            // fc(sourceBuffer);
-        }
+            const fc = (sourceBuffer) => {
+                fetch("http://localhost:8080/video").then(
+                    async resp => {
+                        const reader = resp.body.getReader();
+                        let l = 0;
+                        while(true) {
+                            const body = await reader.read();
+                            if(body.done) {
+                                break;
+                            }
+                            await new Promise((resolve, _) => {
+                                console.log(body.value);
+                                l += body.value.length;
+                                sourceBuffer.appendBuffer(body.value);
+                                sourceBuffer.onupdateend = (() => {
+                                    resolve(true);
+                                });
+                            });
+                        }
+                        console.log(l);
+                    },
+                    reason => console.log(`Rejected due to: ${reason}`)
+                );
+            }
+
+            mediaSource.onsourceopen = () => {
+                let sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+                webs(sourceBuffer);
+                // fc(sourceBuffer);
+            }
+        })
     </script>
 </body>
 </html>
