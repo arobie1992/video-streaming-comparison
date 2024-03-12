@@ -13,7 +13,7 @@
             const video = document.querySelector("#video");
             video.src = URL.createObjectURL(mediaSource);
 
-            const webs = (sourceBuffer) => {
+            const streamVideo = (sourceBuffer) => {
                 const ws = new WebSocket("ws://localhost:8080/stream");
                 ws.onerror = e => console.log('error!', e);
                 ws.binaryType = 'arraybuffer';
@@ -31,44 +31,20 @@
                             });
                         });
                     }
+                    console.log('received:', l);
                 }
-                ws.onmessage = async e => {
-                    const buf = new Uint8Array(e.data);
-                    if(buf.length) {
-                        q.push(buf);
-                    }
-                }
+                ws.onmessage = async e => q.push(new Uint8Array(e.data));
             }
 
-            const fc = (sourceBuffer) => {
-                fetch("http://localhost:8080/video").then(
-                    async resp => {
-                        const reader = resp.body.getReader();
-                        let l = 0;
-                        while(true) {
-                            const body = await reader.read();
-                            if(body.done) {
-                                break;
-                            }
-                            await new Promise((resolve, _) => {
-                                console.log(body.value);
-                                l += body.value.length;
-                                sourceBuffer.appendBuffer(body.value);
-                                sourceBuffer.onupdateend = (() => {
-                                    resolve(true);
-                                });
-                            });
-                        }
-                        console.log(l);
-                    },
-                    reason => console.log(`Rejected due to: ${reason}`)
-                );
-            }
+            let sourceBuffer;
+            mediaSource.onsourceopen = () => sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
 
-            mediaSource.onsourceopen = () => {
-                let sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
-                webs(sourceBuffer);
-                // fc(sourceBuffer);
+            let firstPlay = true;
+            video.onplay = () => {
+                if(firstPlay) {
+                    streamVideo(sourceBuffer);
+                    firstPlay = false;
+                }
             }
         })
     </script>
