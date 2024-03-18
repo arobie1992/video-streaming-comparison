@@ -22,26 +22,46 @@
                 ws.onclose = async () => {
                     ws.close();
                     console.log('ws closed', 'received:', l);
+                    if(!q.length) {
+                        return;
+                    }
+                    sourceBuffer.onupdateend = () => {
+                        if(q.length) {
+                            sourceBuffer.appendBuffer(q.shift());
+                        }
+                    }
+                    if(!sourceBuffer.updating) {
+                        sourceBuffer.appendBuffer(q.shift());
+                    }
                 }
-                ws.onmessage = async e => {
+                let i = 0;
+                ws.onmessage = e => {
                     const data = new Uint8Array(e.data);
                     l += data.length;
-                    if(sourceBuffer.updating || q.length) {
-                        q.push(data);
-                        while(q.length) {
-                            await new Promise((resolve, _) => {
-                                sourceBuffer.appendBuffer(q.shift());
-                                sourceBuffer.onupdateend = (() => resolve(true));
-                            });
+                    // i++;
+                    // if(i === 200) {
+                    //     return;
+                    // }
+                    q.push(data);
+                    if(!sourceBuffer.updating) {
+                        try {
+                            sourceBuffer.appendBuffer(q.shift());
+                        } catch(e) {
+                            console.log(e);
+                            throw e;
                         }
-                    } else {
-                        sourceBuffer.appendBuffer(e.data);
+                        if(video.error) {
+                            console.log(video.error);
+                        }
                     }
                 }
             }
 
             let sourceBuffer;
-            mediaSource.onsourceopen = () => sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+            mediaSource.onsourceopen = () => {
+                sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+                sourceBuffer.onerror = e => console.log('sourceBuffer error', e);
+            }
 
             let firstPlay = true;
             video.onplay = () => {
