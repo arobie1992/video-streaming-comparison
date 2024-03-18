@@ -15,7 +15,7 @@
 
             const streamVideo = (sourceBuffer) => {
                 const ws = new WebSocket('ws://localhost:8080/stream');
-                ws.onerror = e => console.log('error!', e);
+                ws.onerror = e => console.log('websocket error:', e);
                 ws.binaryType = 'arraybuffer';
                 const q = [];
                 let l = 0;
@@ -34,34 +34,18 @@
                         sourceBuffer.appendBuffer(q.shift());
                     }
                 }
-                let i = 0;
                 ws.onmessage = e => {
                     const data = new Uint8Array(e.data);
                     l += data.length;
-                    // i++;
-                    // if(i === 200) {
-                    //     return;
-                    // }
                     q.push(data);
                     if(!sourceBuffer.updating) {
-                        try {
-                            sourceBuffer.appendBuffer(q.shift());
-                        } catch(e) {
-                            console.log(e);
-                            throw e;
-                        }
-                        if(video.error) {
-                            console.log(video.error);
-                        }
+                        sourceBuffer.appendBuffer(q.shift());
                     }
                 }
             }
 
             let sourceBuffer;
-            mediaSource.onsourceopen = () => {
-                sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
-                sourceBuffer.onerror = e => console.log('sourceBuffer error', e);
-            }
+            mediaSource.onsourceopen = () => sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
 
             let firstPlay = true;
             video.onplay = () => {
