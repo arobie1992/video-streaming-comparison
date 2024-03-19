@@ -1,3 +1,6 @@
+import { Eta } from "https://deno.land/x/eta@v3.0.3/src/index.ts";
+const eta = new Eta({ views: 'client/', cache: true });
+
 const loadConfig = () => {
     const configContents = Deno.readTextFileSync("./config.json");
     return JSON.parse(configContents);
@@ -14,7 +17,11 @@ const handler = (request: Request): Promise<Response>|Response => {
 };
 
 const pageHandler = async (): Promise<Response> => {
-    const file = await Deno.readFile("./client/ws-stored.html");
+    const file = eta.render('ws-stored', {
+        transport: 'WebSocket',
+        videoType: 'Stored',
+        host: `${config.hostname}:${config.port}`
+    });
     return new Response(file, {
         headers: {"content-type": "text/html"},
         status: 200

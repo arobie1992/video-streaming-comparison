@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>WebSocket Stored Video</title>
+    <title><%= it.transport %> <%= it.videoType %> Video</title>
 </head>
 <body>
     <video id="video" width="750" controls></video>
@@ -14,7 +14,7 @@
             video.src = URL.createObjectURL(mediaSource);
 
             const streamVideo = (sourceBuffer) => {
-                const ws = new WebSocket('ws://localhost:8080/stream');
+                const ws = new WebSocket('ws://<%= it.host %>/stream');
                 ws.onerror = e => console.log('websocket error:', e);
                 ws.binaryType = 'arraybuffer';
                 const q = [];
