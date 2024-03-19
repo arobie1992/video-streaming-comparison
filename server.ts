@@ -1,4 +1,9 @@
-const port= 8080;
+const loadConfig = () => {
+    const configContents = Deno.readTextFileSync("./config.json");
+    return JSON.parse(configContents);
+}
+
+const config = loadConfig();
 
 const handler = (request: Request): Promise<Response>|Response => {
     const url = new URL(request.url);
@@ -50,4 +55,4 @@ const throttledSend = async (send: (buff: Uint8Array) => void , cleanup: () => v
     setTimeout(() => throttledSend(send, cleanup, f, totalSent), 1);
 }
 
-Deno.serve({ port }, handler);
+Deno.serve({ hostname: config.hostname, port: config.port }, handler);
