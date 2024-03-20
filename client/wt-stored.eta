@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title><%= it.transport %> <%= it.videoType %> Video</title>
+</head>
+<body>
+    <video id="video" width="750" controls></video>
+    <script type="text/javascript">
+        window.addEventListener('load', function () {
+            const mimeCodec = 'video/mp4; codecs="avc1.4D401F, mp4a.40.2"';
+            const mediaSource = new MediaSource();
+            const video = document.querySelector('#video');
+            video.src = URL.createObjectURL(mediaSource);
+
+            const streamVideo = async (sourceBuffer) => {
+                const wt = new WebTransport('https://<%= it.host %>/wtstream');
+                await wt.ready;
+                const stream = await wt.createBidirectionalStream();
+                const reader = await stream.readable.getReader();
+                let i = 0;
+                while(true) {
+                    const { done, value } = await reader.read();
+                    if(done) {
+                        break;
+                    }
+                    i += value.length;
+                    await new Promise((resolve) => {
+                        sourceBuffer.onupdateend = () => resolve();
+                        sourceBuffer.appendBuffer(value);
+                    });
+                }
+                console.log('finished streaming video', i);
+            }
+
+            let sourceBuffer;
+            mediaSource.onsourceopen = () => sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+
+            let firstPlay = true;
+            video.onplay = () => {
+                if(firstPlay) {
+                    streamVideo(sourceBuffer);
+                    firstPlay = false;
+                }
+            }
+        })
+    </script>
+</body>
+</html>
