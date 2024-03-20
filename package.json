@@ -4,8 +4,9 @@
   "main": "index.js",
   "type": "module",
   "dependencies": {
+    "@fails-components/webtransport": "^1.0.11",
+    "@fails-components/webtransport-transport-http3-quiche": "^1.0.11",
     "eta": "^3.4.0",
-    "socket.io": "^4.7.5",
     "ws": "^8.16.0"
   }
 }
