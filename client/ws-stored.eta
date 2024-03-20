@@ -14,7 +14,7 @@
             video.src = URL.createObjectURL(mediaSource);
 
             const streamVideo = (sourceBuffer) => {
-                const ws = new WebSocket('ws://<%= it.host %>/stream');
+                const ws = new WebSocket('wss://<%= it.host %>/stream');
                 ws.onerror = e => console.log('websocket error:', e);
                 ws.binaryType = 'arraybuffer';
                 const q = [];
