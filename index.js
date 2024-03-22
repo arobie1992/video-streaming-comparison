@@ -4,6 +4,7 @@ import { Eta, EtaFileResolutionError } from "eta";
 import { WebSocketServer } from 'ws';
 import * as fs from 'node:fs';
 import { Http3Server } from "@fails-components/webtransport";
+import * as wrtc from 'wrtc';
 
 const loadConfig = async () => {
     const configContents = await readFile("config.json");
@@ -18,6 +19,28 @@ const eta = new Eta({ views: "client", cache: false });
 const httpsServer = createServer(
     {key, cert},
     async (req, res) => {
+        if(req.url === '/wrtc/stored') {
+            const page = fs.readFileSync('client/wrtc-stored.html');
+            res.writeHead(200, {"content-type": "text/html"});
+            res.write(page);
+            res.end();
+            return;
+        }
+        if(req.url === '/stream/wrtc') {
+            req.on('data', async chunk => {
+                const offer = JSON.parse(chunk.toString());
+                const conn = new wrtc.default.RTCPeerConnection();
+                conn.setRemoteDescription(offer);
+                const answer = await conn.createAnswer();
+                conn.setLocalDescription(answer);
+                const dc = conn.createDataChannel("test", {negotiated: true, id: 0});
+                console.log(dc);
+                res.writeHead(200, {"content-type": "application/json"});
+                res.write(JSON.stringify(answer));
+                res.end();
+            });
+            return;
+        }
         const parts = req.url.substring(1).split('/');
         try {
             const page = eta.render(`${parts[0]}-${parts[1]}`, {

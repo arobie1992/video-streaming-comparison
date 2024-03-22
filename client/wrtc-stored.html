@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>wrtc stored Video</title>
+</head>
+<body>
+<video id="video" width="750" controls></video>
+<script type="text/javascript">
+    window.addEventListener('load', async function() {
+        const conn = new RTCPeerConnection();
+        conn.ondatachannel = e => console.log(e);
+        let offer = await conn.createOffer();
+        await conn.setLocalDescription(offer);
+        offer = conn.localDescription;
+        const resp = await fetch("https://localhost:8080/stream/wrtc", {
+            method: "post",
+            mode: "cors",
+            cache: "no-cache",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(offer)
+        });
+        const { done, value } = await resp.body.getReader().read();
+        const answer = JSON.parse(new TextDecoder().decode(value));
+        await conn.setRemoteDescription(answer);
+        const chan = conn.createDataChannel('test', {negotiated: true, id: 0});
+        console.log(chan);
+        chan.send('test');
+
+        // const mimeCodec = 'video/mp4; codecs="avc1.4D401F, mp4a.40.2"';
+        // const mediaSource = new MediaSource();
+        // const video = document.querySelector('#video');
+        // video.src = URL.createObjectURL(mediaSource);
+        //
+        // const streamVideo = async (sourceBuffer) => {
+        //
+        // }
+        //
+        // let sourceBuffer;
+        // mediaSource.onsourceopen = () => sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+        //
+        // let firstPlay = true;
+        // video.onplay = () => {
+        //     if(firstPlay) {
+        //         streamVideo(sourceBuffer);
+        //         firstPlay = false;
+        //     }
+        // }
+    })
+</script>
+</body>
+</html>
