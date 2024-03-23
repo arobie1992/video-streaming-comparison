@@ -25,6 +25,13 @@ const httpsServer = createServer(
             res.end();
             return;
         }
+        if(req.url === '/wt/call') {
+            const file = fs.readFileSync("client/wt-call.html");
+            res.writeHead(200, {"content-type": "text/html"});
+            res.write(file);
+            res.end();
+            return;
+        }
         if(req.url === "/video/raw") {
             const file = fs.readFileSync("video/fragged-SampleVideo_1280x720_30mb.mp4");
             res.writeHead(200, {"content-type": "video/mp4"});
@@ -127,11 +134,10 @@ const h3Server = new Http3Server({
 });
 h3Server.startServer();
 
-(async () => {
-    const stream = await h3Server.sessionStream("/wtstream");
+const wtEventLoop = async (streamPath, wtBehavior) => {
+    const stream = await h3Server.sessionStream(streamPath);
     const sessionReader = stream.getReader();
 
-    // this is the event loop to handle incoming streams from the client
     while (true) {
         const { done, value: session } = await sessionReader.read();
         if (done) {
@@ -143,8 +149,32 @@ h3Server.startServer();
             if(done) {
                 break;
             }
-            const writer = await stream.writable.getWriter();
-            streamVideo((chunk) => writer.write(chunk), () => writer.close());
+            wtBehavior(stream);
         }
     }
-})();
+}
+
+wtEventLoop('/wtstream', async (stream) => {
+    const writer = await stream.writable.getWriter();
+    streamVideo((chunk) => writer.write(chunk), () => writer.close());
+});
+
+wtEventLoop('/wtstream/call', async (stream) => {
+    const writer = await stream.writable.getWriter();
+    streamVideo((chunk) => writer.write(chunk), () => {
+        console.log('local finished sending');
+        writer.close();
+    });
+    (async () => {
+        const reader = await stream.readable.getReader();
+        let i = 0;
+        while(true) {
+            const { done, value } = await reader.read();
+            if(done || value.length === 0) {
+                break;
+            }
+            i += value.length;
+        }
+        console.log('finished receiving', i);
+    })();
+});
