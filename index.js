@@ -18,20 +18,6 @@ const eta = new Eta({ views: "client", cache: false });
 const httpsServer = createServer(
     {key, cert},
     async (req, res) => {
-        if(req.url === '/ws/call') {
-            const file = fs.readFileSync("client/ws-call.html");
-            res.writeHead(200, {"content-type": "text/html"});
-            res.write(file);
-            res.end();
-            return;
-        }
-        if(req.url === '/wt/call') {
-            const file = fs.readFileSync("client/wt-call.html");
-            res.writeHead(200, {"content-type": "text/html"});
-            res.write(file);
-            res.end();
-            return;
-        }
         if(req.url === "/video/raw") {
             const file = fs.readFileSync("video/fragged-SampleVideo_1280x720_30mb.mp4");
             res.writeHead(200, {"content-type": "video/mp4"});
@@ -42,8 +28,6 @@ const httpsServer = createServer(
         const parts = req.url.substring(1).split('/');
         try {
             const page = eta.render(`${parts[0]}-${parts[1]}`, {
-                transport: parts[0],
-                videoType: parts[1],
                 host: `${config.hostname}:${config.port}`
             });
             res.writeHead(200, {"content-type": "text/html"});

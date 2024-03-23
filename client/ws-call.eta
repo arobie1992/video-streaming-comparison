@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title><%= it.transport %> <%= it.videoType %> Video</title>
+    <title>WebSocket Video Call</title>
 </head>
 <body>
 <video id="video" width="750" controls></video>
 <script type="text/javascript">
     window.addEventListener('load', async () => {
-        const videoFile = await fetch('https://localhost:8080/video/raw');
+        const videoFile = await fetch('https://<%= it.host %>/video/raw');
         const reader = await videoFile.body.getReader();
         let videoBuffer = [];
         while(true) {

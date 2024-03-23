@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title><%= it.transport %> <%= it.videoType %> Video</title>
+    <title>WebTransport Video Call</title>
 </head>
 <body>
     <video id="video" width="750" controls></video>
@@ -25,7 +25,7 @@
             video.src = URL.createObjectURL(mediaSource);
 
             const streamVideo = async (sourceBuffer) => {
-                const wt = new WebTransport('https://localhost:8080/wtstream/call');
+                const wt = new WebTransport('https://<%= it.host %>/wtstream/call');
                 await wt.ready;
                 const stream = await wt.createBidirectionalStream();
                 (async () => {
