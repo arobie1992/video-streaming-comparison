@@ -14,7 +14,7 @@
             video.src = URL.createObjectURL(mediaSource);
 
             const streamVideo = async (sourceBuffer) => {
-                const wt = new WebTransport('https://<%= it.host %>/wtstream');
+                const wt = new WebTransport('https://<%= host %>/wtstream');
                 await wt.ready;
                 const stream = await wt.createBidirectionalStream();
                 const reader = await stream.readable.getReader();

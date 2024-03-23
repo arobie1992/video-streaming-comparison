@@ -8,7 +8,7 @@
     <video id="video" width="750" controls></video>
     <script type="text/javascript">
         window.addEventListener('load', async () => {
-            const videoFile = await fetch('https://localhost:8080/video/raw');
+            const videoFile = await fetch('https://<%= host %>/video/raw');
             const reader = await videoFile.body.getReader();
             let videoBuffer = [];
             while(true) {
@@ -25,7 +25,7 @@
             video.src = URL.createObjectURL(mediaSource);
 
             const streamVideo = async (sourceBuffer) => {
-                const wt = new WebTransport('https://<%= it.host %>/wtstream/call');
+                const wt = new WebTransport('https://<%= host %>/wtstream/call');
                 await wt.ready;
                 const stream = await wt.createBidirectionalStream();
                 (async () => {

@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:https";
-import { Eta, EtaFileResolutionError } from "eta";
 import { WebSocketServer } from 'ws';
 import * as fs from 'node:fs';
 import { Http3Server } from "@fails-components/webtransport";
+import * as ejs from 'ejs';
 
 const loadConfig = async () => {
     const configContents = await readFile("config.json");
@@ -13,7 +13,6 @@ const loadConfig = async () => {
 const config = await loadConfig();
 const key = await readFile(".scratch/key.pem");
 const cert = await readFile(".scratch/cert.pem");
-const eta = new Eta({ views: "client", cache: false });
 
 const httpsServer = createServer(
     {key, cert},
@@ -27,19 +26,19 @@ const httpsServer = createServer(
         }
         const parts = req.url.substring(1).split('/');
         try {
-            const page = eta.render(`${parts[0]}-${parts[1]}`, {
+            const page = await ejs.renderFile(`client/${parts[0]}-${parts[1]}.ejs`, {
                 host: `${config.hostname}:${config.port}`
             });
             res.writeHead(200, {"content-type": "text/html"});
             res.write(page);
         } catch(e) {
-            if(e instanceof EtaFileResolutionError) {
+            if(e.message.startsWith('ENOENT: no such file or directory, open ')) {
                 res.writeHead(404, {"content-type": "text/html"});
-                res.write(eta.render('not-found'));
+                res.write(await ejs.renderFile('client/not-found.ejs'));
             } else {
                 console.log(e);
                 res.writeHead(500, {"content-type": "text/html"});
-                res.write(eta.render('server-error'));
+                res.write(ejs.renderFile('client/server-error.ejs'));
             }
         } finally {
             res.end();
