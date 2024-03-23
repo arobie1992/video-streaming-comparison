@@ -46,11 +46,14 @@
             ws.onclose = async () => {
                 console.log('ws closed', 'received:', l);
                 if(!q.length) {
+                    mediaSource.endOfStream();
                     return;
                 }
                 sourceBuffer.onupdateend = () => {
                     if(q.length) {
                         sourceBuffer.appendBuffer(q.shift());
+                    } else {
+                        mediaSource.endOfStream();
                     }
                 }
                 if(!sourceBuffer.updating) {

@@ -30,6 +30,7 @@
                         sourceBuffer.appendBuffer(value);
                     });
                 }
+                mediaSource.endOfStream();
                 console.log('finished streaming video', i);
             }
 
