@@ -18,6 +18,20 @@ const eta = new Eta({ views: "client", cache: false });
 const httpsServer = createServer(
     {key, cert},
     async (req, res) => {
+        if(req.url === '/ws/call') {
+            const file = fs.readFileSync("client/ws-call.html");
+            res.writeHead(200, {"content-type": "text/html"});
+            res.write(file);
+            res.end();
+            return;
+        }
+        if(req.url === "/video/raw") {
+            const file = fs.readFileSync("video/fragged-SampleVideo_1280x720_30mb.mp4");
+            res.writeHead(200, {"content-type": "video/mp4"});
+            res.write(file);
+            res.end();
+            return;
+        }
         const parts = req.url.substring(1).split('/');
         try {
             const page = eta.render(`${parts[0]}-${parts[1]}`, {
@@ -58,13 +72,40 @@ const streamVideo = (send, close) => {
 }
 
 const wss = new WebSocketServer({ noServer: true });
-wss.on('connection', async function connection(ws) {
+wss.on('connection', async function connection(ws, req) {
     ws.on('error', console.error);
-    streamVideo((chunk) => ws.send(chunk), () => ws.close());
+    if(req.url === '/stream/call') {
+        let i = 0;
+        let remoteFinished = false;
+        let localFinished = false;
+        ws.on('message', (chunk) => {
+            i += chunk.length;
+            if(chunk.length === 0) {
+                console.log('remote finished');
+                remoteFinished = true;
+            }
+            if(localFinished && remoteFinished) {
+                console.log('both local and remote finished, closing');
+                ws.close();
+            }
+        });
+        ws.onclose = () => console.log('received', i);
+        streamVideo((chunk) => ws.send(chunk), () => {
+            ws.send(new Uint8Array());
+            localFinished = true;
+            console.log('local finished');
+            if(localFinished && remoteFinished) {
+                console.log('both local and remote finished, closing');
+                ws.close();
+            }
+        });
+    } else {
+        streamVideo((chunk) => ws.send(chunk), () => ws.close());
+    }
 });
 
 httpsServer.on('upgrade', function upgrade(request, socket, head) {
-    if (request.url === '/stream') {
+    if (request.url.startsWith('/stream')) {
         wss.handleUpgrade(request, socket, head, function done(ws) {
             wss.emit('connection', ws, request);
         });
