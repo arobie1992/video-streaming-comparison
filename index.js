@@ -18,11 +18,16 @@ const eta = new Eta({ views: "client", cache: false });
 const httpsServer = createServer(
     {key, cert},
     async (req, res) => {
+        if(req.url === "/video/raw") {
+            const file = fs.readFileSync("video/fragged-SampleVideo_1280x720_30mb.mp4");
+            res.writeHead(200, {"content-type": "video/mp4"});
+            res.write(file);
+            res.end();
+            return;
+        }
         const parts = req.url.substring(1).split('/');
         try {
             const page = eta.render(`${parts[0]}-${parts[1]}`, {
-                transport: parts[0],
-                videoType: parts[1],
                 host: `${config.hostname}:${config.port}`
             });
             res.writeHead(200, {"content-type": "text/html"});
@@ -58,13 +63,40 @@ const streamVideo = (send, close) => {
 }
 
 const wss = new WebSocketServer({ noServer: true });
-wss.on('connection', async function connection(ws) {
+wss.on('connection', async function connection(ws, req) {
     ws.on('error', console.error);
-    streamVideo((chunk) => ws.send(chunk), () => ws.close());
+    if(req.url === '/stream/call') {
+        let i = 0;
+        let remoteFinished = false;
+        let localFinished = false;
+        ws.on('message', (chunk) => {
+            i += chunk.length;
+            if(chunk.length === 0) {
+                console.log('remote finished');
+                remoteFinished = true;
+            }
+            if(localFinished && remoteFinished) {
+                console.log('both local and remote finished, closing');
+                ws.close();
+            }
+        });
+        ws.onclose = () => console.log('received', i);
+        streamVideo((chunk) => ws.send(chunk), () => {
+            ws.send(new Uint8Array());
+            localFinished = true;
+            console.log('local finished');
+            if(localFinished && remoteFinished) {
+                console.log('both local and remote finished, closing');
+                ws.close();
+            }
+        });
+    } else {
+        streamVideo((chunk) => ws.send(chunk), () => ws.close());
+    }
 });
 
 httpsServer.on('upgrade', function upgrade(request, socket, head) {
-    if (request.url === '/stream') {
+    if (request.url.startsWith('/stream')) {
         wss.handleUpgrade(request, socket, head, function done(ws) {
             wss.emit('connection', ws, request);
         });
@@ -86,11 +118,10 @@ const h3Server = new Http3Server({
 });
 h3Server.startServer();
 
-(async () => {
-    const stream = await h3Server.sessionStream("/wtstream");
+const wtEventLoop = async (streamPath, wtBehavior) => {
+    const stream = await h3Server.sessionStream(streamPath);
     const sessionReader = stream.getReader();
 
-    // this is the event loop to handle incoming streams from the client
     while (true) {
         const { done, value: session } = await sessionReader.read();
         if (done) {
@@ -102,8 +133,32 @@ h3Server.startServer();
             if(done) {
                 break;
             }
-            const writer = await stream.writable.getWriter();
-            streamVideo((chunk) => writer.write(chunk), () => writer.close());
+            wtBehavior(stream);
         }
     }
-})();
+}
+
+wtEventLoop('/wtstream', async (stream) => {
+    const writer = await stream.writable.getWriter();
+    streamVideo((chunk) => writer.write(chunk), () => writer.close());
+});
+
+wtEventLoop('/wtstream/call', async (stream) => {
+    const writer = await stream.writable.getWriter();
+    streamVideo((chunk) => writer.write(chunk), () => {
+        console.log('local finished sending');
+        writer.close();
+    });
+    (async () => {
+        const reader = await stream.readable.getReader();
+        let i = 0;
+        while(true) {
+            const { done, value } = await reader.read();
+            if(done || value.length === 0) {
+                break;
+            }
+            i += value.length;
+        }
+        console.log('finished receiving', i);
+    })();
+});

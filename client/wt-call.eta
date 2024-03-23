@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebTransport Video Call</title>
+</head>
+<body>
+    <video id="video" width="750" controls></video>
+    <script type="text/javascript">
+        window.addEventListener('load', async () => {
+            const videoFile = await fetch('https://localhost:8080/video/raw');
+            const reader = await videoFile.body.getReader();
+            let videoBuffer = [];
+            while(true) {
+                const { done, value } = await reader.read();
+                if(done) {
+                    break;
+                }
+                videoBuffer.push(value);
+            }
+
+            const mimeCodec = 'video/mp4; codecs="avc1.4D401F, mp4a.40.2"';
+            const mediaSource = new MediaSource();
+            const video = document.querySelector('#video');
+            video.src = URL.createObjectURL(mediaSource);
+
+            const streamVideo = async (sourceBuffer) => {
+                const wt = new WebTransport('https://<%= it.host %>/wtstream/call');
+                await wt.ready;
+                const stream = await wt.createBidirectionalStream();
+                (async () => {
+                    const reader = await stream.readable.getReader();
+                    let i = 0;
+                    while(true) {
+                        const { done, value } = await reader.read();
+                        if(done || value.length === 0) {
+                            break;
+                        }
+                        i += value.length;
+                        await new Promise((resolve) => {
+                            sourceBuffer.onupdateend = () => resolve();
+                            sourceBuffer.appendBuffer(value);
+                        });
+                    }
+                    console.log('finished streaming video', i);
+                })();
+                (async () => {
+                    const writer = await stream.writable.getWriter();
+                    for(const chunk of videoBuffer) {
+                        writer.write(chunk);
+                    }
+                    writer.close();
+                    console.log('local finished');
+                })();
+            }
+
+            let sourceBuffer;
+            mediaSource.onsourceopen = () => sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+
+            let firstPlay = true;
+            video.onplay = () => {
+                if(firstPlay) {
+                    streamVideo(sourceBuffer);
+                    firstPlay = false;
+                }
+            }
+        })
+    </script>
+</body>
+</html>

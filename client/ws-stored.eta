@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title><%= it.transport %> <%= it.videoType %> Video</title>
+    <title>WebSocket Stored Video</title>
 </head>
 <body>
     <video id="video" width="750" controls></video>
