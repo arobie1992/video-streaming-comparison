@@ -5,6 +5,8 @@ import * as fs from 'node:fs';
 import { Http3Server } from "@fails-components/webtransport";
 import * as ejs from 'ejs';
 
+const textEncoder = new TextEncoder();
+
 const metricReports = {};
 
 const loadConfig = async () => {
