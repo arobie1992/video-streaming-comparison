@@ -5,10 +5,7 @@ import * as fs from 'node:fs';
 import { Http3Server } from "@fails-components/webtransport";
 import * as ejs from 'ejs';
 
-const metricReports = {
-    clientReports: [],
-    serverReports: []
-};
+const metricReports = {};
 
 const loadConfig = async () => {
     const configContents = await readFile("config.json");
@@ -38,8 +35,10 @@ const httpsServer = createServer(
                         buff += chunk.toString();
                         if(buff.length === contentLength) {
                             const report = JSON.parse(buff);
-                            console.log(report);
-                            metricReports.clientReports.push(report);
+                            if(!metricReports[report.metrics.streamId]) {
+                                metricReports[report.metrics.streamId] = {};
+                            }
+                            metricReports[report.metrics.streamId].clientReport = report;
                             res.writeHead(200);
                             res.end();
                         }
@@ -50,10 +49,6 @@ const httpsServer = createServer(
                     res.writeHead(200, {'content-type': 'application/json'});
                     res.write(body);
                     res.end();
-                    break;
-                case "DELETE":
-                    metricReports.clientReports.length = 0;
-                    metricReports.serverReports.length = 0;
                     break;
                 default:
                     res.writeHead(405, {'Allow': ["GET", "POST"].join(',')});
@@ -83,18 +78,46 @@ const httpsServer = createServer(
     }
 );
 
+const addSnapshot = (metrics, seqNo, msgLength, type) => {
+    metrics.snapshots.push({
+        time: performance.now(),
+        seqNo,
+        msgLength,
+        type
+    });
+}
+
 const streamVideo = (send, close) => {
+    const streamId = crypto.randomUUID();
+    let seqNoCounter = 0;
+    const metrics = {
+        streamId,
+        snapshots: []
+    };
+    send(textEncoder.encode(`${seqNoCounter++}.${streamId}`));
+
     console.log("beginning sending video");
     const readStream = fs.createReadStream("video/fragged-SampleVideo_1280x720_30mb.mp4");
+    addSnapshot(metrics, null, 0, 'open');
     let bytesSent = 0;
+
     readStream.on('data', function(chunk) {
-        bytesSent += chunk.length;
-        send(chunk);
+        const seqNo = seqNoCounter++;
+        const encSeqNo = textEncoder.encode(seqNo.toString());
+        const message = new Uint8Array([...encSeqNo, 0, ...chunk]);
+        bytesSent += message.length;
+        addSnapshot(metrics, seqNo, message.length, 'message send');
+        send(message);
     });
 
     readStream.on('end', function() {
         console.log("finished sending video", bytesSent);
         close();
+        addSnapshot(metrics, null, 0, 'close');
+        if(!metricReports[streamId]) {
+            metricReports[streamId] = {};
+        }
+        metricReports[streamId].serverReport = metrics;
     });
 }
 
