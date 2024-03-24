@@ -5,6 +5,11 @@ import * as fs from 'node:fs';
 import { Http3Server } from "@fails-components/webtransport";
 import * as ejs from 'ejs';
 
+const metricReports = {
+    clientReports: [],
+    serverReports: []
+};
+
 const loadConfig = async () => {
     const configContents = await readFile("config.json");
     return JSON.parse(configContents);
@@ -22,6 +27,38 @@ const httpsServer = createServer(
             res.writeHead(200, {"content-type": "video/mp4"});
             res.write(file);
             res.end();
+            return;
+        }
+        if(req.url === '/metrics') {
+            switch (req.method) {
+                case "POST":
+                    let buff = "";
+                    const contentLength = +req.headers["content-length"];
+                    req.on('data', chunk => {
+                        buff += chunk.toString();
+                        if(buff.length === contentLength) {
+                            const report = JSON.parse(buff);
+                            console.log(report);
+                            metricReports.clientReports.push(report);
+                            res.writeHead(200);
+                            res.end();
+                        }
+                    });
+                    break;
+                case "GET":
+                    const body = JSON.stringify(metricReports);
+                    res.writeHead(200, {'content-type': 'application/json'});
+                    res.write(body);
+                    res.end();
+                    break;
+                case "DELETE":
+                    metricReports.clientReports.length = 0;
+                    metricReports.serverReports.length = 0;
+                    break;
+                default:
+                    res.writeHead(405, {'Allow': ["GET", "POST"].join(',')});
+                    res.end();
+            }
             return;
         }
         const parts = req.url.substring(1).split('/');

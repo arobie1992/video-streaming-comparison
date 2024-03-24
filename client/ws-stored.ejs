@@ -13,17 +13,51 @@
             const video = document.querySelector('#video');
             video.src = URL.createObjectURL(mediaSource);
 
+            const metrics = [];
+            const addSnapshot = async (data, type) => {
+                const hashBuff = data ? await crypto.subtle.digest("SHA-1", data) : null;
+                const hash = hashBuff
+                    ? Array.from(new Uint8Array(hashBuff)).map((b) => b.toString(16).padStart(2, "0")).join("")
+                    : null;
+                metrics.push({
+                    time: performance.now(),
+                    hash,
+                    type
+                })
+            }
+            const sendMetrics = () => {
+                const metricsReport = {
+                    scenario: 'ws/stored',
+                    type: 'qos',
+                    metrics
+                };
+                const body = JSON.stringify(metricsReport);
+                fetch('https://<%= host %>/metrics', {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Content-Length": body.length
+                    },
+                    body
+                });
+            }
             const streamVideo = (sourceBuffer) => {
                 const ws = new WebSocket('wss://<%= host %>/stream');
+                ws.onopen = () => {
+                    addSnapshot(null, "open");
+                }
                 ws.onerror = e => console.log('websocket error:', e);
                 ws.binaryType = 'arraybuffer';
                 const q = [];
                 let l = 0;
                 ws.onclose = async () => {
+                    addSnapshot(null, "close");
                     ws.close();
                     console.log('ws closed', 'received:', l);
                     if(!q.length) {
                         mediaSource.endOfStream();
+                        sendMetrics();
                         return;
                     }
                     sourceBuffer.onupdateend = () => {
@@ -31,6 +65,7 @@
                             sourceBuffer.appendBuffer(q.shift());
                         } else {
                             mediaSource.endOfStream();
+                            sendMetrics();
                         }
                     }
                     if(!sourceBuffer.updating) {
@@ -39,6 +74,7 @@
                 }
                 ws.onmessage = e => {
                     const data = new Uint8Array(e.data);
+                    addSnapshot(data, "message");
                     l += data.length;
                     q.push(data);
                     if(!sourceBuffer.updating) {
