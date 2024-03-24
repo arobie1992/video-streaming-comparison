@@ -7,12 +7,33 @@
 <body>
     <video id="video" width="750" controls></video>
     <script type="text/javascript">
+        const textDecoder = new TextDecoder();
+
+        const estimateClockDiff = async () => {
+            const body = JSON.stringify({ start: performance.now() })
+            const resp = await fetch('https://<%= host %>/timestamp', {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Content-Length": body.length
+                },
+                body
+            });
+            const end = performance.now();
+            const reader = await resp.body.getReader();
+            const { value } = await reader.read();
+            const respBody = JSON.parse(textDecoder.decode(value));
+            const rtt = end - respBody.start;
+            const oneWay = rtt/2;
+            return respBody.serverTime - (respBody.start + oneWay);
+        }
+
         window.addEventListener('load', function () {
             const mimeCodec = 'video/mp4; codecs="avc1.4D401F, mp4a.40.2"';
             const mediaSource = new MediaSource();
             const video = document.querySelector('#video');
             video.src = URL.createObjectURL(mediaSource);
-            const textDecoder = new TextDecoder();
 
             const metrics = {
                 streamId: undefined,
@@ -27,10 +48,13 @@
                 });
             }
 
-            const sendMetrics = () => {
+            let startClockDiff;
+            const sendMetrics = async () => {
+                const endClockDiff = await estimateClockDiff();
                 const metricsReport = {
                     scenario: 'ws/stored',
                     type: 'qos',
+                    averageClockDiff: (startClockDiff+endClockDiff)/2,
                     metrics
                 };
                 const body = JSON.stringify(metricsReport);
@@ -47,8 +71,9 @@
 
             const streamVideo = (sourceBuffer) => {
                 const ws = new WebSocket('wss://<%= host %>/stream');
-                ws.onopen = () => {
+                ws.onopen = async () => {
                     addSnapshot(metrics, null, 0, 'open');
+                    startClockDiff = await estimateClockDiff();
                 }
                 ws.onerror = e => console.log('websocket error:', e);
                 ws.binaryType = 'arraybuffer';

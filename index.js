@@ -46,6 +46,7 @@ const calculateMetrics = () => {
             },
             latency: {
                 value: undefined,
+                stdev: undefined,
                 unit: "ms"
             },
             errorRate: {
@@ -69,6 +70,41 @@ const calculateMetrics = () => {
             interarrivalTimes.push(times[i] - times[i-1]);
         }
         report.jitter.value = standardDeviation(interarrivalTimes);
+
+        const pairedSnapshots = {};
+        for(const e of clientMetrics.snapshots) {
+            if(e.seqNo === -1) {
+                continue;
+            }
+            if(!pairedSnapshots[e.seqNo]) {
+                pairedSnapshots[e.seqNo] = {}
+            }
+            pairedSnapshots[e.seqNo].client = e;
+        }
+        for(const e of serverMetrics.snapshots) {
+            if(e.seqNo === -1) {
+                continue;
+            }
+            if(!pairedSnapshots[e.seqNo]) {
+                pairedSnapshots[e.seqNo] = {}
+            }
+            pairedSnapshots[e.seqNo].server = e;
+        }
+
+        const latencies = [];
+        console.log();
+        Object.keys(pairedSnapshots).forEach(key => {
+            const client = pairedSnapshots[key].client;
+            const server = pairedSnapshots[key].server;
+            if(!client || !server) {
+                return;
+            }
+            latencies.push(client.time + metrics.clientReport.averageClockDiff - server.time);
+        });
+        console.log(latencies);
+        report.latency.value = latencies.reduce((acc, val) => acc + val, 0)/latencies.length;
+        report.latency.stdev = standardDeviation(latencies);
+
         reports.push(report);
     });
     return reports;
@@ -77,6 +113,16 @@ const calculateMetrics = () => {
 const httpsServer = createServer(
     {key, cert},
     async (req, res) => {
+        if(req.url === '/timestamp') {
+            req.on('data', chunk => {
+                const body = JSON.parse(chunk.toString());
+                body.serverTime = performance.now();
+                res.writeHead(200, {"content-type": "application/json"});
+                res.write(JSON.stringify(body));
+                res.end();
+            });
+            return;
+        }
         if(req.url === "/video/raw") {
             const file = fs.readFileSync("video/fragged-SampleVideo_1280x720_30mb.mp4");
             res.writeHead(200, {"content-type": "video/mp4"});
