@@ -18,6 +18,62 @@ const config = await loadConfig();
 const key = await readFile(".scratch/key.pem");
 const cert = await readFile(".scratch/cert.pem");
 
+const standardDeviation = (values) => {
+    const n = values.length;
+    const mean = values.reduce((a, b) => a + b) / n;
+    return Math.sqrt(values.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / n);
+}
+
+const calculateMetrics = () => {
+    const reports = [];
+    Object.keys(metricReports).forEach((key) => {
+        const metrics = metricReports[key];
+        const serverMetrics = metrics.serverReport;
+        const clientMetrics = metrics.clientReport.metrics;
+        if(!serverMetrics || !clientMetrics) {
+            return;
+        }
+        const report = {
+            streamId: key,
+            scenario: metrics.clientReport.scenario,
+            throughput: {
+                value: undefined,
+                unit: "bps"
+            },
+            jitter: {
+                value: undefined,
+                unit: "ms"
+            },
+            latency: {
+                value: undefined,
+                unit: "ms"
+            },
+            errorRate: {
+                value: undefined,
+                unit: "%"
+            },
+            startDelay: {
+                value: undefined,
+                unit: "ms"
+            },
+            rebufferingRatio: {
+                value: undefined,
+                unit: "%"
+            }
+        };
+        const times = clientMetrics.snapshots.map(s => s.time).sort();
+        const totalData = clientMetrics.snapshots.map(s => s.msgLength).reduce((acc, next) => acc + next, 0);
+        report.throughput.value = totalData/Math.max(1, (times[times.length-1] - times[0]));
+        const interarrivalTimes = [];
+        for(let i = 1; i < times.length-1; i++) {
+            interarrivalTimes.push(times[i] - times[i-1]);
+        }
+        report.jitter.value = standardDeviation(interarrivalTimes);
+        reports.push(report);
+    });
+    return reports;
+}
+
 const httpsServer = createServer(
     {key, cert},
     async (req, res) => {
@@ -47,7 +103,7 @@ const httpsServer = createServer(
                     });
                     break;
                 case "GET":
-                    const body = JSON.stringify(metricReports);
+                    const body = JSON.stringify(calculateMetrics());
                     res.writeHead(200, {'content-type': 'application/json'});
                     res.write(body);
                     res.end();
