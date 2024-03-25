@@ -7,15 +7,90 @@
 <body>
     <video id="video" width="750" controls></video>
     <script type="text/javascript">
+        const textDecoder = new TextDecoder();
+
+        const estimateClockDiff = async () => {
+            const body = JSON.stringify({ start: performance.now() })
+            const resp = await fetch('https://<%= host %>/timestamp', {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Content-Length": body.length
+                },
+                body
+            });
+            const end = performance.now();
+            const reader = await resp.body.getReader();
+            const { value } = await reader.read();
+            const respBody = JSON.parse(textDecoder.decode(value));
+            const rtt = end - respBody.start;
+            const oneWay = rtt/2;
+            return respBody.serverTime - (respBody.start + oneWay);
+        }
+
         window.addEventListener('load', function () {
             const mimeCodec = 'video/mp4; codecs="avc1.4D401F, mp4a.40.2"';
             const mediaSource = new MediaSource();
             const video = document.querySelector('#video');
             video.src = URL.createObjectURL(mediaSource);
 
+            const metrics = {
+                streamId: undefined,
+                snapshots: []
+            };
+            const addSnapshot = (metrics, message, type) => {
+                metrics.snapshots.push({
+                    time: performance.now(),
+                    message,
+                    type
+                });
+            }
+
+            let startClockDiff;
+            const sendMetrics = async () => {
+                const endClockDiff = await estimateClockDiff();
+                const processedMetrics = [];
+                for(const m of metrics.snapshots) {
+                    const msgLength = m.message ? m.message.length : 0;
+                    const msgHash = m.message ? await crypto.subtle.digest("SHA-1", m.message) : null;
+                    const msgHashStr = msgHash
+                        ? Array.from(new Uint8Array(msgHash)).map((b) => b.toString(16).padStart(2, "0")).join("")
+                        : null;
+                    processedMetrics.push({
+                        time: m.time,
+                        msgHash: msgHashStr,
+                        msgLength,
+                        type: m.type
+                    })
+                }
+                metrics.snapshots = undefined;
+                metrics.snapshots = processedMetrics;
+                const metricsReport = {
+                    scenario: 'ws/stored',
+                    type: 'qos',
+                    averageClockDiff: (startClockDiff+endClockDiff)/2,
+                    metrics
+                };
+                console.log(metricsReport);
+                const body = JSON.stringify(metricsReport);
+                fetch('https://<%= host %>/metrics', {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Content-Length": body.length
+                    },
+                    body
+                });
+            }
+
             const streamVideo = async (sourceBuffer) => {
                 const wt = new WebTransport('https://<%= host %>/wtstream');
                 await wt.ready;
+                addSnapshot(metrics, null, 'open');
+                startClockDiff = await estimateClockDiff();
+
                 const stream = await wt.createBidirectionalStream();
                 const reader = await stream.readable.getReader();
                 let i = 0;
@@ -25,13 +100,26 @@
                         break;
                     }
                     i += value.length;
+
+                    if(!metrics.streamId) {
+                        const textRep = textDecoder.decode(value);
+                        const sep = textRep.indexOf('.');
+                        metrics.streamId = textRep.substring(sep + 1);
+                        addSnapshot(metrics, value, 'message received');
+                        continue;
+                    }
+
+                    console.log(value.length);
+                    addSnapshot(metrics, value, 'message received');
                     await new Promise((resolve) => {
                         sourceBuffer.onupdateend = () => resolve();
                         sourceBuffer.appendBuffer(value);
                     });
                 }
+                addSnapshot(metrics, null, 'close');
                 mediaSource.endOfStream();
                 console.log('finished streaming video', i);
+                await sendMetrics();
             }
 
             let sourceBuffer;

@@ -39,11 +39,10 @@
                 streamId: undefined,
                 snapshots: []
             };
-            const addSnapshot = (metrics, seqNo, msgLength, type) => {
+            const addSnapshot = (metrics, message, type) => {
                 metrics.snapshots.push({
                     time: performance.now(),
-                    seqNo,
-                    msgLength,
+                    message,
                     type
                 });
             }
@@ -51,6 +50,22 @@
             let startClockDiff;
             const sendMetrics = async () => {
                 const endClockDiff = await estimateClockDiff();
+                const processedMetrics = [];
+                for(const m of metrics.snapshots) {
+                    const msgLength = m.message ? m.message.length : 0;
+                    const msgHash = m.message ? await crypto.subtle.digest("SHA-1", m.message) : null;
+                    const msgHashStr = msgHash
+                        ? Array.from(new Uint8Array(msgHash)).map((b) => b.toString(16).padStart(2, "0")).join("")
+                        : null;
+                    processedMetrics.push({
+                        time: m.time,
+                        msgHash: msgHashStr,
+                        msgLength,
+                        type: m.type
+                    })
+                }
+                metrics.snapshots = undefined;
+                metrics.snapshots = processedMetrics;
                 const metricsReport = {
                     scenario: 'ws/stored',
                     type: 'qos',
@@ -72,7 +87,7 @@
             const streamVideo = (sourceBuffer) => {
                 const ws = new WebSocket('wss://<%= host %>/stream');
                 ws.onopen = async () => {
-                    addSnapshot(metrics, null, 0, 'open');
+                    addSnapshot(metrics, null, 'open');
                     startClockDiff = await estimateClockDiff();
                 }
                 ws.onerror = e => console.log('websocket error:', e);
@@ -81,7 +96,7 @@
                 let l = 0;
                 ws.onclose = async () => {
                     ws.close();
-                    addSnapshot(metrics, null, 0, 'close');
+                    addSnapshot(metrics, null, 'close');
                     console.log('ws closed', 'received:', l);
                     if(!q.length) {
                         mediaSource.endOfStream();
@@ -106,20 +121,12 @@
                     if(!metrics.streamId) {
                         const textRep = textDecoder.decode(data);
                         const sep = textRep.indexOf('.');
-                        const seqNo = +textRep.substring(0, sep);
                         metrics.streamId = textRep.substring(sep + 1);
-                        addSnapshot(metrics, seqNo, data.length, 'message received');
+                        addSnapshot(metrics, data, 'message received');
                         return;
                     }
-                    let sep = 0;
-                    while(data[sep] !== 0) {
-                        sep++;
-                    }
-                    const encSeqNo = data.subarray(0, sep);
-                    const seqNo = +textDecoder.decode(encSeqNo);
-                    const videoData = data.subarray(sep+1);
-                    addSnapshot(metrics, seqNo, data.length, 'message received');
-                    q.push(videoData);
+                    addSnapshot(metrics, data, 'message received');
+                    q.push(data);
                     if(!sourceBuffer.updating) {
                         sourceBuffer.appendBuffer(q.shift());
                     }

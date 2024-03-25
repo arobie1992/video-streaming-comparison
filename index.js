@@ -28,24 +28,20 @@ const calculateMetrics = () => {
     const reports = [];
     Object.keys(metricReports).forEach((key) => {
         const metrics = metricReports[key];
-        const serverMetrics = metrics.serverReport;
-        const clientMetrics = metrics.clientReport.metrics;
-        if(!serverMetrics || !clientMetrics) {
-            return;
-        }
         const report = {
             streamId: key,
             scenario: metrics.clientReport.scenario,
             throughput: {
                 value: undefined,
-                unit: "bps"
+                unit: "bytes/ms"
             },
             jitter: {
-                value: undefined,
+                average: undefined,
+                stdev: undefined,
                 unit: "ms"
             },
             latency: {
-                value: undefined,
+                average: undefined,
                 stdev: undefined,
                 unit: "ms"
             },
@@ -62,49 +58,19 @@ const calculateMetrics = () => {
                 unit: "%"
             }
         };
-        const times = clientMetrics.snapshots.map(s => s.time).sort();
-        const totalData = clientMetrics.snapshots.map(s => s.msgLength).reduce((acc, next) => acc + next, 0);
-        report.throughput.value = totalData/Math.max(1, (times[times.length-1] - times[0]));
+        // throughput calculation
+        const times = metrics.clientReport.metrics.snapshots.map(s => s.time);
+        const duration = times[times.length-1] - times[0];
+        const totalBytes = metrics.clientReport.metrics.snapshots.map(s => s.msgLength).reduce((acc, v) => acc + v, 0);
+        report.throughput.value = totalBytes/Math.max(duration, 1);
+
+        // jitter calculation
         const interarrivalTimes = [];
         for(let i = 1; i < times.length-1; i++) {
             interarrivalTimes.push(times[i] - times[i-1]);
         }
-        report.jitter.value = standardDeviation(interarrivalTimes);
-
-        const pairedSnapshots = {};
-        for(const e of clientMetrics.snapshots) {
-            if(e.seqNo === -1) {
-                continue;
-            }
-            if(!pairedSnapshots[e.seqNo]) {
-                pairedSnapshots[e.seqNo] = {}
-            }
-            pairedSnapshots[e.seqNo].client = e;
-        }
-        for(const e of serverMetrics.snapshots) {
-            if(e.seqNo === -1) {
-                continue;
-            }
-            if(!pairedSnapshots[e.seqNo]) {
-                pairedSnapshots[e.seqNo] = {}
-            }
-            pairedSnapshots[e.seqNo].server = e;
-        }
-
-        const latencies = [];
-        console.log();
-        Object.keys(pairedSnapshots).forEach(key => {
-            const client = pairedSnapshots[key].client;
-            const server = pairedSnapshots[key].server;
-            if(!client || !server) {
-                return;
-            }
-            latencies.push(client.time + metrics.clientReport.averageClockDiff - server.time);
-        });
-        console.log(latencies);
-        report.latency.value = latencies.reduce((acc, val) => acc + val, 0)/latencies.length;
-        report.latency.stdev = standardDeviation(latencies);
-
+        report.jitter.average = interarrivalTimes.reduce((acc, v) => acc + v, 0)/interarrivalTimes.length;
+        report.jitter.stdev = standardDeviation(interarrivalTimes);
         reports.push(report);
     });
     return reports;
@@ -182,13 +148,33 @@ const httpsServer = createServer(
     }
 );
 
-const addSnapshot = (metrics, seqNo, msgLength, type) => {
+const addSnapshot = (metrics, seqNo, message, type) => {
     metrics.snapshots.push({
         time: performance.now(),
         seqNo,
-        msgLength,
+        message,
         type
     });
+}
+
+const processMetrics = async (metrics) => {
+    const processedMetrics = [];
+    for(const m of metrics.snapshots) {
+        const msgLength = m.message ? m.message.length : 0;
+        const msgHash = m.message ? await crypto.subtle.digest("SHA-1", m.message) : null;
+        const msgHashStr = msgHash
+            ? Array.from(new Uint8Array(msgHash)).map((b) => b.toString(16).padStart(2, "0")).join("")
+            : null;
+        processedMetrics.push({
+            time: m.time,
+            seqNo: m.seqNo,
+            msgHash: msgHashStr,
+            msgLength,
+            type: m.type
+        })
+    }
+    metrics.snapshots = processedMetrics;
+    return metrics;
 }
 
 const streamVideo = (send, close) => {
@@ -207,21 +193,19 @@ const streamVideo = (send, close) => {
 
     readStream.on('data', function(chunk) {
         const seqNo = seqNoCounter++;
-        const encSeqNo = textEncoder.encode(seqNo.toString());
-        const message = new Uint8Array([...encSeqNo, 0, ...chunk]);
-        bytesSent += message.length;
-        addSnapshot(metrics, seqNo, message.length, 'message send');
-        send(message);
+        addSnapshot(metrics, seqNo, chunk, 'message send');
+        send(chunk);
+        bytesSent += chunk.length;
     });
 
-    readStream.on('end', function() {
+    readStream.on('end', async function() {
         console.log("finished sending video", bytesSent);
         close();
         addSnapshot(metrics, null, 0, 'close');
         if(!metricReports[streamId]) {
             metricReports[streamId] = {};
         }
-        metricReports[streamId].serverReport = metrics;
+        metricReports[streamId].serverReport = await processMetrics(metrics);
     });
 }
 
