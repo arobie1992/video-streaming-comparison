@@ -37,7 +37,8 @@
 
             const metrics = {
                 streamId: undefined,
-                snapshots: []
+                snapshots: [],
+                rebufferingTime: 0
             };
             const addSnapshot = (metrics, message, type) => {
                 metrics.snapshots.push({
@@ -45,6 +46,28 @@
                     message,
                     type
                 });
+            }
+
+            let playbackHasBegun = false;
+            let lastWaitingTime;
+            video.onplaying = () => {
+                const time = performance.now();
+                if(playbackHasBegun) {
+                    if(lastWaitingTime) {
+                        metrics.rebufferingTime += time - lastWaitingTime;
+                        lastWaitingTime = undefined;
+                    }
+                } else {
+                    metrics.startTime = time;
+                    playbackHasBegun = true;
+                }
+            }
+            video.onwaiting = () => {
+                lastWaitingTime = performance.now();
+            }
+            video.onended = () => {
+                metrics.endTime = performance.now();
+                sendMetrics();
             }
 
             let startClockDiff;
@@ -64,14 +87,13 @@
                         type: m.type
                     })
                 }
-                metrics.snapshots = undefined;
                 metrics.snapshots = processedMetrics;
                 const metricsReport = {
                     scenario: 'ws/stored',
-                    type: 'qos',
                     averageClockDiff: (startClockDiff+endClockDiff)/2,
                     metrics
                 };
+                console.log('sending metrics report for stream', metrics.streamId);
                 const body = JSON.stringify(metricsReport);
                 fetch('https://<%= host %>/metrics', {
                     method: "POST",
@@ -100,7 +122,6 @@
                     console.log('ws closed', 'received:', l);
                     if(!q.length) {
                         mediaSource.endOfStream();
-                        sendMetrics();
                         return;
                     }
                     sourceBuffer.onupdateend = () => {
@@ -108,7 +129,6 @@
                             sourceBuffer.appendBuffer(q.shift());
                         } else {
                             mediaSource.endOfStream();
-                            sendMetrics();
                         }
                     }
                     if(!sourceBuffer.updating) {

@@ -71,6 +71,13 @@ const calculateMetrics = () => {
         }
         report.jitter.average = interarrivalTimes.reduce((acc, v) => acc + v, 0)/interarrivalTimes.length;
         report.jitter.stdev = standardDeviation(interarrivalTimes);
+
+        // start delay
+        report.startDelay.value = metrics.clientReport.metrics.startTime - metrics.clientReport.metrics.snapshots[0].time;
+
+        // rebuffering ratio
+        const totalTime = metrics.clientReport.metrics.endTime - metrics.clientReport.metrics.startTime;
+        report.rebufferingRatio.value = metrics.clientReport.metrics.rebufferingTime/totalTime;
         reports.push(report);
     });
     return reports;
@@ -93,6 +100,13 @@ const httpsServer = createServer(
             const file = fs.readFileSync("video/fragged-SampleVideo_1280x720_30mb.mp4");
             res.writeHead(200, {"content-type": "video/mp4"});
             res.write(file);
+            res.end();
+            return;
+        }
+        if(req.url === '/metrics/raw') {
+            const body = JSON.stringify(metricReports);
+            res.writeHead(200, {'content-type': 'application/json'});
+            res.write(body);
             res.end();
             return;
         }
@@ -184,12 +198,14 @@ const streamVideo = (send, close) => {
         streamId,
         snapshots: []
     };
-    send(textEncoder.encode(`${seqNoCounter++}.${streamId}`));
+    let bytesSent = 0;
+    const enc = textEncoder.encode(`${seqNoCounter++}.${streamId}`);
+    send(enc);
+    bytesSent += enc.length;
 
     console.log("beginning sending video");
     const readStream = fs.createReadStream("video/fragged-SampleVideo_1280x720_30mb.mp4");
     addSnapshot(metrics, null, 0, 'open');
-    let bytesSent = 0;
 
     readStream.on('data', function(chunk) {
         const seqNo = seqNoCounter++;
