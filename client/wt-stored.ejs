@@ -93,7 +93,6 @@
                     averageClockDiff: (startClockDiff+endClockDiff)/2,
                     metrics
                 };
-                console.log('sending metrics report for stream', metrics.streamId);
                 const body = JSON.stringify(metricsReport);
                 fetch('https://<%= host %>/metrics', {
                     method: "POST",
@@ -104,6 +103,7 @@
                     },
                     body
                 });
+                alert(`sent metrics report for stream ${metrics.streamId}`);
             }
 
             const streamVideo = async (sourceBuffer) => {
