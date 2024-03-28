@@ -239,7 +239,7 @@ const streamVideo = (send, close) => {
         snapshots: []
     };
     let bytesSent = 0;
-    const enc = textEncoder.encode(`${seqNoCounter++}.${streamId}`);
+    const enc = textEncoder.encode(streamId);
     send(enc);
     bytesSent += enc.length;
 

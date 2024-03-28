@@ -139,9 +139,7 @@
                     const data = new Uint8Array(e.data);
                     l += data.length;
                     if(!metrics.streamId) {
-                        const textRep = textDecoder.decode(data);
-                        const sep = textRep.indexOf('.');
-                        metrics.streamId = textRep.substring(sep + 1);
+                        metrics.streamId = textDecoder.decode(data);
                         addSnapshot(metrics, data, 'message received');
                         return;
                     }

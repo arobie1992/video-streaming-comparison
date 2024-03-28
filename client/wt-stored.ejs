@@ -116,21 +116,23 @@
                 const reader = await stream.readable.getReader();
                 let i = 0;
                 while(true) {
-                    const { done, value } = await reader.read();
+                    let { done, value } = await reader.read();
                     if(done) {
                         break;
                     }
                     i += value.length;
+                    addSnapshot(metrics, value, 'message received');
 
                     if(!metrics.streamId) {
-                        const textRep = textDecoder.decode(value);
-                        const sep = textRep.indexOf('.');
-                        metrics.streamId = textRep.substring(sep + 1);
-                        addSnapshot(metrics, value, 'message received');
-                        continue;
+                        if(value.length > 36) {
+                            metrics.streamId = textDecoder.decode(value.subarray(0, 36));
+                            value = value.subarray(36);
+                        } else {
+                            metrics.streamId = textDecoder.decode(value);
+                            continue;
+                        }
                     }
 
-                    addSnapshot(metrics, value, 'message received');
                     await new Promise((resolve) => {
                         sourceBuffer.onupdateend = () => resolve();
                         sourceBuffer.appendBuffer(value);
