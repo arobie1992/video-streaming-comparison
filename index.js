@@ -6,8 +6,21 @@ import { Http3Server } from "@fails-components/webtransport";
 import * as ejs from 'ejs';
 
 const textEncoder = new TextEncoder();
+const metricsFileName = '.scratch/metrics.json';
 
-const metricReports = {};
+const loadMetrics = () => {
+    if(fs.existsSync(metricsFileName)) {
+        const text = fs.readFileSync(metricsFileName);
+        return JSON.parse(text);
+    }
+    return {};
+}
+
+const metricReports = loadMetrics();
+
+const saveMetrics = (metrics) => {
+    fs.writeFileSync(metricsFileName, JSON.stringify(metrics, null, 2));
+}
 
 const loadConfig = async () => {
     const configContents = await readFile("config.json");
@@ -128,6 +141,7 @@ const httpsServer = createServer(
                 }
                 const body = JSON.parse(chunk.toString());
                 metrics.tags = metrics.tags ? {...metrics.tags, ...body} : body;
+                saveMetrics(metricReports);
                 res.writeHead(204);
                 res.end();
             });
@@ -148,6 +162,7 @@ const httpsServer = createServer(
                                 metricReports[report.metrics.streamId].timestamp = new Date();
                             }
                             metricReports[report.metrics.streamId].clientReport = report;
+                            saveMetrics(metricReports);
                             res.writeHead(200);
                             res.end();
                         }
@@ -249,6 +264,7 @@ const streamVideo = (send, close) => {
             metricReports[streamId].timestamp = new Date();
         }
         metricReports[streamId].serverReport = await processMetrics(metrics);
+        saveMetrics(metricReports);
     });
 }
 
