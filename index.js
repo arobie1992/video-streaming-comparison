@@ -30,12 +30,15 @@ const calculateMetrics = () => {
         const metrics = metricReports[key];
         const report = {
             streamId: key,
+            tags: metrics.tags,
             scenario: metrics.clientReport.scenario,
             throughput: {
                 value: undefined,
                 unit: "bytes/ms"
             },
             jitter: {
+                min: undefined,
+                max: undefined,
                 average: undefined,
                 stdev: undefined,
                 unit: "ms"
@@ -69,6 +72,8 @@ const calculateMetrics = () => {
         for(let i = 1; i < times.length-1; i++) {
             interarrivalTimes.push(times[i] - times[i-1]);
         }
+        report.jitter.min = interarrivalTimes.reduce((acc, v) => acc ? Math.min(acc, v) : v, undefined);
+        report.jitter.max = interarrivalTimes.reduce((acc, v) => acc ? Math.max(acc, v) : v, undefined);
         report.jitter.average = interarrivalTimes.reduce((acc, v) => acc + v, 0)/interarrivalTimes.length;
         report.jitter.stdev = standardDeviation(interarrivalTimes);
 
@@ -110,6 +115,24 @@ const httpsServer = createServer(
             res.end();
             return;
         }
+        let match = req.url.match('/metrics/([A-Za-z0-9-]+)/tag');
+        if(match && req.method === "POST") {
+            req.on('data', chunk => {
+                const metricsId = match[1];
+                const metrics = metricReports[metricsId];
+                if(!metrics) {
+                    res.writeHead(404, {'content-type': 'text/plain'});
+                    res.write("Unrecognized metrics ID");
+                    res.end();
+                    return;
+                }
+                const body = JSON.parse(chunk.toString());
+                metrics.tags = metrics.tags ? {...metrics.tags, ...body} : body;
+                res.writeHead(204);
+                res.end();
+            });
+            return;
+        }
         if(req.url === '/metrics') {
             switch (req.method) {
                 case "POST":
@@ -121,6 +144,8 @@ const httpsServer = createServer(
                             const report = JSON.parse(buff);
                             if(!metricReports[report.metrics.streamId]) {
                                 metricReports[report.metrics.streamId] = {};
+                                // timestamp is just for organizational purposes
+                                metricReports[report.metrics.streamId].timestamp = new Date();
                             }
                             metricReports[report.metrics.streamId].clientReport = report;
                             res.writeHead(200);
@@ -220,6 +245,8 @@ const streamVideo = (send, close) => {
         addSnapshot(metrics, null, 0, 'close');
         if(!metricReports[streamId]) {
             metricReports[streamId] = {};
+            // timestamp is just for organizational purposes
+            metricReports[streamId].timestamp = new Date();
         }
         metricReports[streamId].serverReport = await processMetrics(metrics);
     });
