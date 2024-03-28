@@ -43,8 +43,8 @@ const calculateMetrics = () => {
         const metrics = metricReports[key];
         const report = {
             streamId: key,
-            tags: metrics.tags,
             scenario: metrics.clientReport.scenario,
+            tags: metrics.tags,
             throughput: {
                 value: undefined,
                 unit: "bytes/ms"
@@ -341,6 +341,7 @@ const wtEventLoop = async (streamPath, wtBehavior) => {
             }
             wtBehavior(stream);
         }
+        session.close();
     }
 }
 

@@ -89,7 +89,7 @@
                 }
                 metrics.snapshots = processedMetrics;
                 const metricsReport = {
-                    scenario: 'ws/stored',
+                    scenario: 'wt/stored',
                     averageClockDiff: (startClockDiff+endClockDiff)/2,
                     metrics
                 };
@@ -130,7 +130,6 @@
                         continue;
                     }
 
-                    console.log(value.length);
                     addSnapshot(metrics, value, 'message received');
                     await new Promise((resolve) => {
                         sourceBuffer.onupdateend = () => resolve();
@@ -139,8 +138,8 @@
                 }
                 addSnapshot(metrics, null, 'close');
                 mediaSource.endOfStream();
+                await wt.close();
                 console.log('finished streaming video', i);
-                await sendMetrics();
             }
 
             let sourceBuffer;
