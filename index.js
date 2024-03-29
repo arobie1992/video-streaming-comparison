@@ -41,6 +41,15 @@ const calculateMetrics = () => {
     const reports = [];
     Object.keys(metricReports).forEach((key) => {
         const metrics = metricReports[key];
+        if(!metrics.clientReport) {
+            const report = {
+                streamId: key,
+                tags: metrics.tags,
+                meta: ['client failed']
+            };
+            reports.push(report);
+            return;
+        }
         const report = {
             streamId: key,
             scenario: metrics.clientReport.scenario,
