@@ -1,10 +1,13 @@
 #!/bin/bash
 
-setup() {
+set -e
+
+init() {
   plr=$2
-  lat=$3
   # format 10Kbit/s
-  bw=$4
+  bw=$3
+  lat=$4
+  proto=$5
 
   if [[ -z "$plr" ]]; then
     echo "plr required"
@@ -21,29 +24,36 @@ setup() {
     exit 1
   fi
 
-  dnctl pipe 1 config plr "$plr" bw "$bw" delay "$lat" noerror
-  echo "dummynet out proto tcp from port 8080 to any pipe 1" | pfctl -f -
-  echo "dummynet in proto tcp from port 8080 to any pipe 1" | pfctl -f -
-  echo "dummynet out proto tcp from any to port 8080 pipe 1" | pfctl -f -
-  echo "dummynet in proto tcp from any to port 8080 pipe 1" | pfctl -f -
+  if [[ -z "$proto" ]]; then
+    echo "proto required"
+    exit 1
+  fi
+
+  sudo dnctl pipe 1 config plr "$plr" bw "$bw" delay "$lat" noerror
+  echo "dummynet out proto $proto from port 8080 to any pipe 1" | sudo pfctl -f -
+  echo "dummynet in proto $proto from port 8080 to any pipe 1" | sudo pfctl -f -
+  echo "dummynet out proto $proto from any to port 8080 pipe 1" | sudo pfctl -f -
+  echo "dummynet in proto $proto from any to port 8080 pipe 1" | sudo pfctl -f -
+  sudo pfctl -e
 }
 
 list() {
-  dnctl list
-  pfctl -sa -v -v
+  sudo dnctl list
+  sudo pfctl -sa -v -v
 }
 
 clean() {
-  dnctl -q flush
-  pfctl -f /etc/pf.conf
+  sudo dnctl -q flush
+  sudo pfctl -f /etc/pf.conf
+  sudo pfctl -d
 }
 
 tag() {
     host=$2
     stream_id=$3
     plr=$4
-    lat=$5
-    bw=$6
+    bw=$5
+    lat=$6
 
     if [[ -z "$host" ]]; then
       echo "host required"
@@ -82,15 +92,12 @@ tag() {
 command=$1
 case "$command" in
   list)
-    sudo /bin/bash
-    show
+    list
     ;;
   init)
-    sudo /bin/bash
-    setup "$@"
+    init "$@"
     ;;
   clean)
-    sudo /bin/bash
     clean
     ;;
   tag)
