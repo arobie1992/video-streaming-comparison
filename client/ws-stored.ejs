@@ -7,20 +7,118 @@
 <body>
     <video id="video" width="750" controls></video>
     <script type="text/javascript">
+        const textDecoder = new TextDecoder();
+
+        const estimateClockDiff = async () => {
+            const body = JSON.stringify({ start: performance.now() })
+            const resp = await fetch('https://<%= host %>/timestamp', {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Content-Length": body.length
+                },
+                body
+            });
+            const end = performance.now();
+            const reader = await resp.body.getReader();
+            const { value } = await reader.read();
+            const respBody = JSON.parse(textDecoder.decode(value));
+            const rtt = end - respBody.start;
+            const oneWay = rtt/2;
+            return respBody.serverTime - (respBody.start + oneWay);
+        }
+
         window.addEventListener('load', function () {
             const mimeCodec = 'video/mp4; codecs="avc1.4D401F, mp4a.40.2"';
             const mediaSource = new MediaSource();
             const video = document.querySelector('#video');
             video.src = URL.createObjectURL(mediaSource);
 
+            const metrics = {
+                streamId: undefined,
+                snapshots: [],
+                rebufferingTime: 0
+            };
+            const addSnapshot = (metrics, message, type) => {
+                metrics.snapshots.push({
+                    time: performance.now(),
+                    message,
+                    type
+                });
+            }
+
+            let playbackHasBegun = false;
+            let lastWaitingTime;
+            video.onplaying = () => {
+                const time = performance.now();
+                if(playbackHasBegun) {
+                    if(lastWaitingTime) {
+                        metrics.rebufferingTime += time - lastWaitingTime;
+                        lastWaitingTime = undefined;
+                    }
+                } else {
+                    metrics.startTime = time;
+                    playbackHasBegun = true;
+                }
+            }
+            video.onwaiting = () => {
+                lastWaitingTime = performance.now();
+            }
+            video.onended = () => {
+                metrics.endTime = performance.now();
+                sendMetrics();
+            }
+
+            let startClockDiff;
+            const sendMetrics = async () => {
+                const endClockDiff = await estimateClockDiff();
+                const processedMetrics = [];
+                for(const m of metrics.snapshots) {
+                    const msgLength = m.message ? m.message.length : 0;
+                    const msgHash = m.message ? await crypto.subtle.digest("SHA-1", m.message) : null;
+                    const msgHashStr = msgHash
+                        ? Array.from(new Uint8Array(msgHash)).map((b) => b.toString(16).padStart(2, "0")).join("")
+                        : null;
+                    processedMetrics.push({
+                        time: m.time,
+                        msgHash: msgHashStr,
+                        msgLength,
+                        type: m.type
+                    })
+                }
+                metrics.snapshots = processedMetrics;
+                const metricsReport = {
+                    scenario: 'ws/stored',
+                    averageClockDiff: (startClockDiff+endClockDiff)/2,
+                    metrics
+                };
+                const body = JSON.stringify(metricsReport);
+                fetch('https://<%= host %>/metrics', {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Content-Length": body.length
+                    },
+                    body
+                });
+                alert(`sent metrics report for stream ${metrics.streamId}`);
+            }
+
             const streamVideo = (sourceBuffer) => {
                 const ws = new WebSocket('wss://<%= host %>/stream');
+                ws.onopen = async () => {
+                    addSnapshot(metrics, null, 'open');
+                    startClockDiff = await estimateClockDiff();
+                }
                 ws.onerror = e => console.log('websocket error:', e);
                 ws.binaryType = 'arraybuffer';
                 const q = [];
                 let l = 0;
                 ws.onclose = async () => {
                     ws.close();
+                    addSnapshot(metrics, null, 'close');
                     console.log('ws closed', 'received:', l);
                     if(!q.length) {
                         mediaSource.endOfStream();
@@ -40,6 +138,12 @@
                 ws.onmessage = e => {
                     const data = new Uint8Array(e.data);
                     l += data.length;
+                    if(!metrics.streamId) {
+                        metrics.streamId = textDecoder.decode(data);
+                        addSnapshot(metrics, data, 'message received');
+                        return;
+                    }
+                    addSnapshot(metrics, data, 'message received');
                     q.push(data);
                     if(!sourceBuffer.updating) {
                         sourceBuffer.appendBuffer(q.shift());

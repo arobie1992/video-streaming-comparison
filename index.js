@@ -5,6 +5,23 @@ import * as fs from 'node:fs';
 import { Http3Server } from "@fails-components/webtransport";
 import * as ejs from 'ejs';
 
+const textEncoder = new TextEncoder();
+const metricsFileName = '.scratch/metrics.json';
+
+const loadMetrics = () => {
+    if(fs.existsSync(metricsFileName)) {
+        const text = fs.readFileSync(metricsFileName);
+        return JSON.parse(text);
+    }
+    return {};
+}
+
+const metricReports = loadMetrics();
+
+const saveMetrics = (metrics) => {
+    fs.writeFileSync(metricsFileName, JSON.stringify(metrics, null, 2));
+}
+
 const loadConfig = async () => {
     const configContents = await readFile("config.json");
     return JSON.parse(configContents);
@@ -14,14 +31,162 @@ const config = await loadConfig();
 const key = await readFile(".scratch/key.pem");
 const cert = await readFile(".scratch/cert.pem");
 
+const standardDeviation = (values) => {
+    const n = values.length;
+    const mean = values.reduce((a, b) => a + b) / n;
+    return Math.sqrt(values.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / n);
+}
+
+const calculateMetrics = () => {
+    const reports = [];
+    Object.keys(metricReports).forEach((key) => {
+        const metrics = metricReports[key];
+        if(!metrics.clientReport) {
+            const report = {
+                streamId: key,
+                tags: metrics.tags,
+                meta: ['client failed']
+            };
+            reports.push(report);
+            return;
+        }
+        const report = {
+            streamId: key,
+            scenario: metrics.clientReport.scenario,
+            tags: metrics.tags,
+            throughput: {
+                value: undefined,
+                unit: "bytes/ms"
+            },
+            jitter: {
+                min: undefined,
+                max: undefined,
+                average: undefined,
+                stdev: undefined,
+                unit: "ms"
+            },
+            latency: {
+                average: undefined,
+                stdev: undefined,
+                unit: "ms"
+            },
+            errorRate: {
+                value: undefined,
+                unit: "%"
+            },
+            startDelay: {
+                value: undefined,
+                unit: "ms"
+            },
+            rebufferingRatio: {
+                value: undefined,
+                unit: "%"
+            }
+        };
+        // throughput calculation
+        const times = metrics.clientReport.metrics.snapshots.map(s => s.time);
+        const duration = times[times.length-1] - times[0];
+        const totalBytes = metrics.clientReport.metrics.snapshots.map(s => s.msgLength).reduce((acc, v) => acc + v, 0);
+        report.throughput.value = totalBytes/Math.max(duration, 1);
+
+        // jitter calculation
+        const interarrivalTimes = [];
+        for(let i = 1; i < times.length-1; i++) {
+            interarrivalTimes.push(times[i] - times[i-1]);
+        }
+        report.jitter.min = interarrivalTimes.reduce((acc, v) => acc ? Math.min(acc, v) : v, undefined);
+        report.jitter.max = interarrivalTimes.reduce((acc, v) => acc ? Math.max(acc, v) : v, undefined);
+        report.jitter.average = interarrivalTimes.reduce((acc, v) => acc + v, 0)/interarrivalTimes.length;
+        report.jitter.stdev = standardDeviation(interarrivalTimes);
+
+        // start delay
+        report.startDelay.value = metrics.clientReport.metrics.startTime - metrics.clientReport.metrics.snapshots[0].time;
+
+        // rebuffering ratio
+        const totalTime = metrics.clientReport.metrics.endTime - metrics.clientReport.metrics.startTime;
+        report.rebufferingRatio.value = metrics.clientReport.metrics.rebufferingTime/totalTime;
+        reports.push(report);
+    });
+    return reports;
+}
+
 const httpsServer = createServer(
     {key, cert},
     async (req, res) => {
+        if(req.url === '/timestamp') {
+            req.on('data', chunk => {
+                const body = JSON.parse(chunk.toString());
+                body.serverTime = performance.now();
+                res.writeHead(200, {"content-type": "application/json"});
+                res.write(JSON.stringify(body));
+                res.end();
+            });
+            return;
+        }
         if(req.url === "/video/raw") {
             const file = fs.readFileSync("video/fragged-SampleVideo_1280x720_30mb.mp4");
             res.writeHead(200, {"content-type": "video/mp4"});
             res.write(file);
             res.end();
+            return;
+        }
+        if(req.url === '/metrics/raw') {
+            const body = JSON.stringify(metricReports);
+            res.writeHead(200, {'content-type': 'application/json'});
+            res.write(body);
+            res.end();
+            return;
+        }
+        let match = req.url.match('/metrics/([A-Za-z0-9-]+)/tag');
+        if(match && req.method === "POST") {
+            req.on('data', chunk => {
+                const metricsId = match[1];
+                const metrics = metricReports[metricsId];
+                if(!metrics) {
+                    res.writeHead(404, {'content-type': 'text/plain'});
+                    res.write("Unrecognized metrics ID");
+                    res.end();
+                    return;
+                }
+                const body = JSON.parse(chunk.toString());
+                metrics.tags = metrics.tags ? {...metrics.tags, ...body} : body;
+                saveMetrics(metricReports);
+                res.writeHead(204);
+                res.end();
+            });
+            return;
+        }
+        if(req.url === '/metrics') {
+            switch (req.method) {
+                case "POST":
+                    let buff = "";
+                    const contentLength = +req.headers["content-length"];
+                    req.on('data', chunk => {
+                        buff += chunk.toString();
+                        if(buff.length === contentLength) {
+                            const report = JSON.parse(buff);
+                            if(!metricReports[report.metrics.streamId]) {
+                                metricReports[report.metrics.streamId] = {};
+                                // timestamp is just for organizational purposes
+                                metricReports[report.metrics.streamId].timestamp = new Date();
+                            }
+                            metricReports[report.metrics.streamId].clientReport = report;
+                            saveMetrics(metricReports);
+                            res.writeHead(200);
+                            res.end();
+                        }
+                    });
+                    break;
+                case "GET":
+                    const body = JSON.stringify(calculateMetrics());
+                    res.writeHead(200, {'content-type': 'application/json'});
+                    res.write(body);
+                    res.end();
+                    break;
+                default:
+                    res.writeHead(405, {'Allow': ["GET", "POST"].join(',')});
+                    res.end();
+            }
             return;
         }
         const parts = req.url.substring(1).split('/');
@@ -46,18 +211,69 @@ const httpsServer = createServer(
     }
 );
 
+const addSnapshot = (metrics, seqNo, message, type) => {
+    metrics.snapshots.push({
+        time: performance.now(),
+        seqNo,
+        message,
+        type
+    });
+}
+
+const processMetrics = async (metrics) => {
+    const processedMetrics = [];
+    for(const m of metrics.snapshots) {
+        const msgLength = m.message ? m.message.length : 0;
+        const msgHash = m.message ? await crypto.subtle.digest("SHA-1", m.message) : null;
+        const msgHashStr = msgHash
+            ? Array.from(new Uint8Array(msgHash)).map((b) => b.toString(16).padStart(2, "0")).join("")
+            : null;
+        processedMetrics.push({
+            time: m.time,
+            seqNo: m.seqNo,
+            msgHash: msgHashStr,
+            msgLength,
+            type: m.type
+        })
+    }
+    metrics.snapshots = processedMetrics;
+    return metrics;
+}
+
 const streamVideo = (send, close) => {
+    const streamId = crypto.randomUUID();
+    let seqNoCounter = 0;
+    const metrics = {
+        streamId,
+        snapshots: []
+    };
+    let bytesSent = 0;
+    const enc = textEncoder.encode(streamId);
+    send(enc);
+    bytesSent += enc.length;
+
     console.log("beginning sending video");
     const readStream = fs.createReadStream("video/fragged-SampleVideo_1280x720_30mb.mp4");
-    let bytesSent = 0;
+    addSnapshot(metrics, null, 0, 'open');
+
     readStream.on('data', function(chunk) {
-        bytesSent += chunk.length;
+        const seqNo = seqNoCounter++;
+        addSnapshot(metrics, seqNo, chunk, 'message send');
         send(chunk);
+        bytesSent += chunk.length;
     });
 
-    readStream.on('end', function() {
+    readStream.on('end', async function() {
         console.log("finished sending video", bytesSent);
         close();
+        addSnapshot(metrics, null, 0, 'close');
+        if(!metricReports[streamId]) {
+            metricReports[streamId] = {};
+            // timestamp is just for organizational purposes
+            metricReports[streamId].timestamp = new Date();
+        }
+        metricReports[streamId].serverReport = await processMetrics(metrics);
+        saveMetrics(metricReports);
     });
 }
 
@@ -134,6 +350,7 @@ const wtEventLoop = async (streamPath, wtBehavior) => {
             }
             wtBehavior(stream);
         }
+        session.close();
     }
 }
 

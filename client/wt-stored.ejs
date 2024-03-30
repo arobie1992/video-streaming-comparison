@@ -7,30 +7,140 @@
 <body>
     <video id="video" width="750" controls></video>
     <script type="text/javascript">
+        const textDecoder = new TextDecoder();
+
+        const estimateClockDiff = async () => {
+            const body = JSON.stringify({ start: performance.now() })
+            const resp = await fetch('https://<%= host %>/timestamp', {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Content-Length": body.length
+                },
+                body
+            });
+            const end = performance.now();
+            const reader = await resp.body.getReader();
+            const { value } = await reader.read();
+            const respBody = JSON.parse(textDecoder.decode(value));
+            const rtt = end - respBody.start;
+            const oneWay = rtt/2;
+            return respBody.serverTime - (respBody.start + oneWay);
+        }
+
         window.addEventListener('load', function () {
             const mimeCodec = 'video/mp4; codecs="avc1.4D401F, mp4a.40.2"';
             const mediaSource = new MediaSource();
             const video = document.querySelector('#video');
             video.src = URL.createObjectURL(mediaSource);
 
+            const metrics = {
+                streamId: undefined,
+                snapshots: [],
+                rebufferingTime: 0
+            };
+            const addSnapshot = (metrics, message, type) => {
+                metrics.snapshots.push({
+                    time: performance.now(),
+                    message,
+                    type
+                });
+            }
+
+            let playbackHasBegun = false;
+            let lastWaitingTime;
+            video.onplaying = () => {
+                const time = performance.now();
+                if(playbackHasBegun) {
+                    if(lastWaitingTime) {
+                        metrics.rebufferingTime += time - lastWaitingTime;
+                        lastWaitingTime = undefined;
+                    }
+                } else {
+                    metrics.startTime = time;
+                    playbackHasBegun = true;
+                }
+            }
+            video.onwaiting = () => {
+                lastWaitingTime = performance.now();
+            }
+            video.onended = () => {
+                metrics.endTime = performance.now();
+                sendMetrics();
+            }
+
+            let startClockDiff;
+            const sendMetrics = async () => {
+                const endClockDiff = await estimateClockDiff();
+                const processedMetrics = [];
+                for(const m of metrics.snapshots) {
+                    const msgLength = m.message ? m.message.length : 0;
+                    const msgHash = m.message ? await crypto.subtle.digest("SHA-1", m.message) : null;
+                    const msgHashStr = msgHash
+                        ? Array.from(new Uint8Array(msgHash)).map((b) => b.toString(16).padStart(2, "0")).join("")
+                        : null;
+                    processedMetrics.push({
+                        time: m.time,
+                        msgHash: msgHashStr,
+                        msgLength,
+                        type: m.type
+                    })
+                }
+                metrics.snapshots = processedMetrics;
+                const metricsReport = {
+                    scenario: 'wt/stored',
+                    averageClockDiff: (startClockDiff+endClockDiff)/2,
+                    metrics
+                };
+                const body = JSON.stringify(metricsReport);
+                fetch('https://<%= host %>/metrics', {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Content-Length": body.length
+                    },
+                    body
+                });
+                alert(`sent metrics report for stream ${metrics.streamId}`);
+            }
+
             const streamVideo = async (sourceBuffer) => {
                 const wt = new WebTransport('https://<%= host %>/wtstream');
                 await wt.ready;
+                addSnapshot(metrics, null, 'open');
+                startClockDiff = await estimateClockDiff();
+
                 const stream = await wt.createBidirectionalStream();
                 const reader = await stream.readable.getReader();
                 let i = 0;
                 while(true) {
-                    const { done, value } = await reader.read();
+                    let { done, value } = await reader.read();
                     if(done) {
                         break;
                     }
                     i += value.length;
+                    addSnapshot(metrics, value, 'message received');
+
+                    if(!metrics.streamId) {
+                        if(value.length > 36) {
+                            metrics.streamId = textDecoder.decode(value.subarray(0, 36));
+                            value = value.subarray(36);
+                        } else {
+                            metrics.streamId = textDecoder.decode(value);
+                            continue;
+                        }
+                    }
+
                     await new Promise((resolve) => {
                         sourceBuffer.onupdateend = () => resolve();
                         sourceBuffer.appendBuffer(value);
                     });
                 }
+                addSnapshot(metrics, null, 'close');
                 mediaSource.endOfStream();
+                await wt.close();
                 console.log('finished streaming video', i);
             }
 
